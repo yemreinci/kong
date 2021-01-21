@@ -149,6 +149,7 @@ for _, strategy in helpers.each_strategy() do
         database = strategy,
         plugins = "bundled,enable-buffering",
         nginx_conf = "spec/fixtures/custom_nginx.template",
+        stream_listen = "127.0.0.1:8880",
       }, nil, nil, fixtures))
     end)
 
@@ -1193,6 +1194,86 @@ for _, strategy in helpers.each_strategy() do
         proxy_ssl_client:close()
 
         proxy_ssl_client = helpers.proxy_ssl_client(nil, "example.org")
+
+        local res = assert(proxy_ssl_client:send {
+          method  = "GET",
+          path    = "/status/200",
+          headers = { ["kong-debug"] = 1 },
+        })
+        assert.res_status(200, res)
+        assert.equal("service_behind_example.org",
+                     res.headers["kong-service-name"])
+
+        res = assert(proxy_ssl_client:send {
+          method  = "GET",
+          path    = "/status/201",
+          headers = { ["kong-debug"] = 1 },
+        })
+        assert.res_status(201, res)
+        assert.equal("service_behind_example.org",
+                     res.headers["kong-service-name"])
+      end)
+    end)
+
+    describe("[snis] for TLS passthrough", function()
+      local routes
+      local proxy_ssl_client
+
+      lazy_setup(function()
+        routes = insert_routes(bp, {
+          {
+            protocols = { "tls" },
+            snis = { "www.example.org" },
+            service = {
+              name = "service_behind_www.example.org"
+            },
+          },
+          {
+            protocols = { "tls" },
+            snis = { "example.org" },
+            service = {
+              name = "service_behind_example.org"
+            },
+          },
+        })
+      end)
+
+      lazy_teardown(function()
+        remove_routes(strategy, routes)
+      end)
+
+      after_each(function()
+        if proxy_ssl_client then
+          proxy_ssl_client:close()
+        end
+      end)
+
+      it("matches a Route based on its 'snis' attribute", function()
+        proxy_ssl_client = helpers.http_client("127.0.0.1", 8880)
+        assert(proxy_ssl_client:ssl_handshake(nil, "www.example.org", false)) -- explicit no-verify
+
+        local res = assert(proxy_ssl_client:send {
+          method  = "GET",
+          path    = "/status/200",
+          headers = { ["kong-debug"] = 1 },
+        })
+        assert.res_status(200, res)
+        assert.equal("service_behind_www.example.org",
+                     res.headers["kong-service-name"])
+
+        res = assert(proxy_ssl_client:send {
+          method  = "GET",
+          path    = "/status/201",
+          headers = { ["kong-debug"] = 1 },
+        })
+        assert.res_status(201, res)
+        assert.equal("service_behind_www.example.org",
+                     res.headers["kong-service-name"])
+
+                     stream_ssl_client:close()
+
+        proxy_ssl_client = helpers.http_client("127.0.0.1", 8880)
+        assert(proxy_ssl_client:ssl_handshake(nil, "example.org", false)) -- explicit no-verify
 
         local res = assert(proxy_ssl_client:send {
           method  = "GET",
