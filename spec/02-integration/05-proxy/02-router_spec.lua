@@ -6,6 +6,7 @@ local path_handling_tests = require "spec.fixtures.router_path_handling_tests"
 
 local enable_buffering
 local enable_buffering_plugin
+local stream_listen_port = 9020
 
 
 local function insert_routes(bp, routes)
@@ -149,7 +150,7 @@ for _, strategy in helpers.each_strategy() do
         database = strategy,
         plugins = "bundled,enable-buffering",
         nginx_conf = "spec/fixtures/custom_nginx.template",
-        stream_listen = "127.0.0.1:8880",
+        stream_listen = string.format("127.0.0.1:%d", stream_listen_port),
       }, nil, nil, fixtures))
     end)
 
@@ -1225,14 +1226,20 @@ for _, strategy in helpers.each_strategy() do
             protocols = { "tls" },
             snis = { "www.example.org" },
             service = {
-              name = "service_behind_www.example.org"
+              name = "service_behind_www.example.org",
+              host = helpers.mock_upstream_ssl_host,
+              port = helpers.mock_upstream_ssl_port,
+              protocol = "tcp",
             },
           },
           {
             protocols = { "tls" },
             snis = { "example.org" },
             service = {
-              name = "service_behind_example.org"
+              name = "service_behind_example.org",
+              host = helpers.mock_upstream_ssl_host,
+              port = helpers.mock_upstream_ssl_port,
+              protocol = "tcp",
             },
           },
         })
@@ -1249,8 +1256,18 @@ for _, strategy in helpers.each_strategy() do
       end)
 
       it("matches a Route based on its 'snis' attribute", function()
-        proxy_ssl_client = helpers.http_client("127.0.0.1", 8880)
-        assert(proxy_ssl_client:ssl_handshake(nil, "www.example.org", false)) -- explicit no-verify
+        -- config propogates to stream subsystems not instantly
+        -- try up to 10 seconds with step of 2 seconds
+        -- in vagrant it takes around 6 seconds
+        helpers.wait_until(function()
+          proxy_ssl_client = helpers.http_client("127.0.0.1", stream_listen_port)
+          local ok =proxy_ssl_client:ssl_handshake(nil, "www.example.org", false) -- explicit no-verify
+          if not ok then
+            proxy_ssl_client:close()
+            return false
+          end
+          return true
+        end, 10, 2)
 
         local res = assert(proxy_ssl_client:send {
           method  = "GET",
@@ -1258,8 +1275,6 @@ for _, strategy in helpers.each_strategy() do
           headers = { ["kong-debug"] = 1 },
         })
         assert.res_status(200, res)
-        assert.equal("service_behind_www.example.org",
-                     res.headers["kong-service-name"])
 
         res = assert(proxy_ssl_client:send {
           method  = "GET",
@@ -1267,12 +1282,10 @@ for _, strategy in helpers.each_strategy() do
           headers = { ["kong-debug"] = 1 },
         })
         assert.res_status(201, res)
-        assert.equal("service_behind_www.example.org",
-                     res.headers["kong-service-name"])
 
-                     stream_ssl_client:close()
+        proxy_ssl_client:close()
 
-        proxy_ssl_client = helpers.http_client("127.0.0.1", 8880)
+        proxy_ssl_client = helpers.http_client("127.0.0.1", stream_listen_port)
         assert(proxy_ssl_client:ssl_handshake(nil, "example.org", false)) -- explicit no-verify
 
         local res = assert(proxy_ssl_client:send {
@@ -1281,8 +1294,6 @@ for _, strategy in helpers.each_strategy() do
           headers = { ["kong-debug"] = 1 },
         })
         assert.res_status(200, res)
-        assert.equal("service_behind_example.org",
-                     res.headers["kong-service-name"])
 
         res = assert(proxy_ssl_client:send {
           method  = "GET",
@@ -1290,8 +1301,8 @@ for _, strategy in helpers.each_strategy() do
           headers = { ["kong-debug"] = 1 },
         })
         assert.res_status(201, res)
-        assert.equal("service_behind_example.org",
-                     res.headers["kong-service-name"])
+
+        proxy_ssl_client:close()
       end)
     end)
 
