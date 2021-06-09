@@ -30,7 +30,6 @@ local assert = assert
 local table = table
 local table_concat = table.concat
 local table_remove = table.remove
-local timer_at = ngx.timer.at
 local run_hook = hooks.run_hook
 local var = ngx.var
 local get_phase = ngx.get_phase
@@ -911,7 +910,7 @@ local function init()
   end
 
   local frequency = kong.configuration.worker_state_update_frequency or 1
-  local _, err = kong.async:every(update_balancer_state)
+  local _, err = kong.async:every(frequency, update_balancer_state)
   if err then
     log(CRIT, "unable to start update proxy state timer: ", err)
   else
