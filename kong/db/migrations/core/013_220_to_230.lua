@@ -63,7 +63,7 @@ return {
       ALTER TABLE clustering_data_planes ADD version text;
       ALTER TABLE clustering_data_planes ADD sync_status text;
     ]],
-    up_f = function(connector)
+    teardown = function(connector)
       local coordinator = assert(connector:get_stored_connection())
       local _, err = coordinator:execute(string.format([[
         INSERT INTO parameters (key, value) VALUES('cluster_id', '%s')
