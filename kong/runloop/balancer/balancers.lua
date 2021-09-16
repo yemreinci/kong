@@ -3,7 +3,7 @@
 local upstreams = require "kong.runloop.balancer.upstreams"
 local targets = require "kong.runloop.balancer.targets"
 local healthcheckers
-local dns_utils = require "resty.dns.utils"
+local dns_utils = require "kong.resty.dns.utils"
 
 local ngx = ngx
 local log = ngx.log
