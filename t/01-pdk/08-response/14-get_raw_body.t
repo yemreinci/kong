@@ -11,26 +11,27 @@ run_tests();
 
 __DATA__
 
-=== TEST 1: response.set_raw_body() sets raw body
+=== TEST 1: response.get_raw_body() gets raw body
 --- http_config eval: $t::Util::HttpConfig
 --- config
     location = /t {
         content_by_lua_block {
-        }
-        header_filter_by_lua_block {
-            ngx.status = 200
-            ngx.header["Content-Length"] = nil
+            ngx.say("Hello, Content by Lua Block")
         }
         body_filter_by_lua_block {
             local PDK = require "kong.pdk"
             local pdk = PDK.new()
 
-            pdk.response.set_raw_body("Hello, World!\n")
+            local body = pdk.response.get_raw_body()
+            if body then
+                pdk.response.set_raw_body(body .. "Enhanced by Body Filter\n")
+            end
         }
     }
 --- request
 GET /t
 --- response_body
-Hello, World!
+Hello, Content by Lua Block
+Enhanced by Body Filter
 --- no_error_log
 [error]
