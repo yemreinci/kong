@@ -9,6 +9,7 @@ on:
 
 env:
   terraform_version: '0.15.3'
+  cache_path: $HOME/build_cache
 
 jobs:
   perf:
@@ -95,12 +96,25 @@ jobs:
         echo ::set-output name=suites::"$suites"
         echo ::set-output name=tags::"$tags"
 
+    - name: Lookup build cache from the other action
+      uses: actions/cache@v2
+      id: cache-deps
+      with:
+        path: ${{ env.cache_path }}
+        key: ${{ hashFiles('.ci/setup_env_github.sh') }}-${{ hashFiles('.github/workflows/build_and_test.yml') }}-${{ hashFiles('.requirements') }}-${{ hashFiles('kong-*.rockspec') }}
+
+    - name: Set artifacts env var if found
+      if: steps.cache-deps.outputs.cache-hit == 'true'
+      run: echo "ARTIFACT_PATH=${{env.cache_path}}/openresty" >> $GITHUB_ENV
+
     - name: Run Tests
       env:
         PERF_TEST_VERSIONS: git:${{ github.sha }},git:master
         PERF_TEST_PACKET_PROJECT_ID: ${{ secrets.PERF_TEST_PACKET_PROJECT_ID }}
         PERF_TEST_PACKET_AUTH_TOKEN: ${{ secrets.PERF_TEST_PACKET_AUTH_TOKEN }}
         PERF_TEST_DRIVER: terraform
+        # ARTIFACT_PATH is set in previous step if cache is hit
+        PERF_TEST_ARTIFACT_PATH: ${{ env.ARTIFACT_PATH }}
       run: |
         for suite in ${{ steps.choose_perf.outputs.suites }}; do
           # Run each test individually, ngx.pipe doesn't like to be imported twice

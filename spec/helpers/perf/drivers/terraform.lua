@@ -292,10 +292,20 @@ function _M:start_kong(version, kong_conf)
     return false, err
   end
 
+  -- artifact_path is the openresty installation path to replace remote
+  -- like: /usr/local/openresty
+  local artifact_path = os.getenv("PERF_TEST_ARTIFACT_PATH")
+  local upload_binary_cmd
+  if use_git and artifact_path and artifact_path ~= "" then
+    upload_binary_cmd = "tar zc -C " .. artifact_path .. " . | " .. ssh_execute_wrap(self, self.kong_ip,
+                  "sudo tar zxv -C /usr/local/openresty/")
+  end
+
   local ok, err = execute_batch(self, nil, {
     -- upload
     use_git and ("tar zc kong | " .. ssh_execute_wrap(self, self.kong_ip,
-      "sudo tar zx -C /usr/local/share/lua/5.1")) or "echo use stock files",
+      "sudo tar zx -C /usr/local/share/lua/5.1")) or "echo use stock lua sources",
+    upload_binary_cmd and upload_binary_cmd or "echo use stock binary",
     -- start kong
     ssh_execute_wrap(self, self.kong_ip,
       "ulimit -n 655360; kong start || kong restart")
