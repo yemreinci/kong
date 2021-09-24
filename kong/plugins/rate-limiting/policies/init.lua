@@ -105,7 +105,7 @@ local function get_memcache_connection(conf)
 
   memc:set_timeout(1000) -- 1 sec
 
-  local ok, err = memc:connect("127.0.0.1", 11211) -- TODO read from config
+  local ok, err = memc:connect("127.0.0.1", 5701) -- TODO read from config
   if not ok then
     kong.log.err("failed to connect: ", err)
     return
@@ -120,6 +120,26 @@ local function get_memcache_connection(conf)
   return memc
 end
 
+local function int_to_bytes(val)
+  local t = {}
+  while val > 0 do
+    local x = val % 256;
+    table.insert(t, 1, string.char(x))
+    val = (val - x) / 256
+  end
+  return table.concat(t)
+end
+
+local function bytes_to_int(s)
+  if s == nil then
+    return 0
+  end
+  local val = 0
+  for i = 1, #s do
+    val = val * 256 + string.byte(s, i)
+  end
+  return val
+end
 
 return {
   ["local"] = {
@@ -268,7 +288,7 @@ return {
           local cache_key = get_local_key(conf, identifier, period, period_date)
           
           kong.log.notice("value: ", value)
-          local ok, err = memc:add(cache_key, value, EXPIRATION[period])
+          local ok, err = memc:add(cache_key, int_to_bytes(value), EXPIRATION[period])
 
           if err == "NOT_STORED" then
             local new_value, err = memc:incr(cache_key, value);
@@ -303,11 +323,13 @@ return {
       local periods = timestamp.get_timestamps(current_timestamp)
       local cache_key = get_local_key(conf, identifier, period, periods[period])
 
-      local current_metric, flags, err = memc:get(cache_key)
+      local current_metric_bytes, flags, err = memc:get(cache_key)
       if err then
         kong.log.err("get err: ", err)
         return nil, err
       end
+
+      local current_metric = bytes_to_int(current_metric_bytes)
 
       local ok, err = memc:set_keepalive(10000, 100)
       if not ok then
