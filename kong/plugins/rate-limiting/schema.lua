@@ -42,6 +42,7 @@ if is_dbless() then
     one_of = {
       "local",
       "redis",
+      "memcached"
     },
   }
 
@@ -54,6 +55,7 @@ else
       "local",
       "cluster",
       "redis",
+      "memcached"
     },
   }
 end

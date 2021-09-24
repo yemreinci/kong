@@ -2,7 +2,7 @@ local policy_cluster = require "kong.plugins.rate-limiting.policies.cluster"
 local timestamp = require "kong.tools.timestamp"
 local reports = require "kong.reports"
 local redis = require "resty.redis"
-
+local memcached = require "resty.memcached"
 
 local kong = kong
 local pairs = pairs
@@ -94,6 +94,30 @@ local function get_redis_connection(conf)
   end
 
   return red
+end
+
+local function get_memcache_connection(conf)
+  local memc, err = memcached:new()
+  if not memc then
+    kong.log.err("failed to instantiate memc: ", err)
+    return
+  end
+
+  memc:set_timeout(1000) -- 1 sec
+
+  local ok, err = memc:connect("127.0.0.1", 11211) -- TODO read from config
+  if not ok then
+    kong.log.err("failed to connect: ", err)
+    return
+  end
+
+  local times, err = memc:get_reused_times()
+  if err then
+    kong.log.err("failed to get connect reused times: ", err)
+    return nil, err
+  end
+
+  return memc
 end
 
 
@@ -222,6 +246,75 @@ return {
       if not ok then
         kong.log.err("failed to set Redis keepalive: ", err)
       end
+
+      return current_metric or 0
+    end
+  },
+  ["memcached"] = {
+    increment = function(conf, limits, identifier, current_timestamp, value)
+      local memc, err = get_memcache_connection(conf)
+      if not memc then
+        return nil, err
+      end
+
+      local periods = timestamp.get_timestamps(current_timestamp)
+
+      kong.log.notice("memc: ", memc)
+
+      for period, period_date in pairs(periods) do
+        if limits[period] then
+          kong.log.notice("period: ", period, " ", period_date)
+
+          local cache_key = get_local_key(conf, identifier, period, period_date)
+          
+          kong.log.notice("value: ", value)
+          local ok, err = memc:add(cache_key, value, EXPIRATION[period])
+
+          if err == "NOT_STORED" then
+            local new_value, err = memc:incr(cache_key, value);
+            if not new_value then
+              kong.log.err("incr err: ", err)
+              return nil, err
+            end
+            kong.log.notice("incremented: ", new_value)
+          elseif err then
+            kong.log.err("add err: ", err)
+            return nil, err
+          end
+
+        end
+      end
+      
+      local ok, err = memc:set_keepalive(10000, 100) -- TODO is this config OK for us?
+
+      if not ok then
+        kong.log.err("failed to set memcache keepalive: ", err)
+        return nil, err
+      end
+
+      return true
+    end,
+    usage = function(conf, identifier, period, current_timestamp)
+      local memc, err = get_memcache_connection(conf)
+      if not memc then
+        return nil, err
+      end
+
+      local periods = timestamp.get_timestamps(current_timestamp)
+      local cache_key = get_local_key(conf, identifier, period, periods[period])
+
+      local current_metric, flags, err = memc:get(cache_key)
+      if err then
+        kong.log.err("get err: ", err)
+        return nil, err
+      end
+
+      local ok, err = memc:set_keepalive(10000, 100)
+      if not ok then
+        kong.log.err("failed to set memcache keepalive: ", err)
+      end
+
+      kong.log.notice("current metric: ", cache_key, " ", current_metric)
 
       return current_metric or 0
     end
